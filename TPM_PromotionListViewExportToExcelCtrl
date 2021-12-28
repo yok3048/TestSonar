@@ -1,0 +1,119 @@
+public with sharing class TPM_PromotionListViewExportToExcelCtrl { 
+    @AuraEnabled  
+    public static ExcelDetailWrapper getAccounts(String listviewId){ 
+        HttpRequest req = new HttpRequest();
+        String baseUrl = URL.getSalesforceBaseUrl().toExternalForm();
+        String endPoinURL = baseUrl+'/services/data/v32.0/sobjects/ACCL__Promotion__c/listviews/' + listviewId + '/describe';
+        req.setEndpoint(endPoinURL);
+        req.setMethod('GET');
+        req.setHeader('Authorization', 'Bearer ' + UserInfo.getSessionId());
+        Http http = new Http();
+        HTTPResponse response = http.send(req);
+        Map<String, Object> tokenResponse = (Map<String, Object>) JSON.deserializeUntyped(response.getBody()); 
+        String query = (String) tokenResponse.get('query');
+        /*String nullVal = 'null';
+        String checkId = query.indexOf('WHERE') != -1 ? ' AND Id != ' + String.escapeSingleQuotes(nullVal) + ' ' : ' WHERE Id != ' + String.escapeSingleQuotes(nullVal) + ' ';
+        query = query.substring(0, query.indexOf('ORDER BY')) + checkId + query.substring(query.indexOf('ORDER BY'));*/
+        system.debug('query##'+query);
+        String fieldQuery = query.substring(7, query.indexOf('Id') - 2);
+        fieldQuery = fieldQuery.replaceAll(' ', '');
+        List<String> listViewFields = fieldQuery.split(',');
+        for(Integer i = 0; i < listViewFields.size(); i++){
+            if(listViewFields[i].indexOf('toLabel') != -1){
+                listViewFields[i] = listViewFields[i].substring(8, listViewFields[i].length() - 1).trim();
+            }
+            
+            if(listViewFields[i].indexOf('.') != -1 && listViewFields[i].indexOf('__r') == -1){
+                listViewFields[i] = listViewFields[i].split('\\.')[0] + 'Id';
+            }
+            
+            if(listViewFields[i].indexOf('__r') != -1){
+                listViewFields[i] = listViewFields[i].substring(0, listViewFields[i].indexOf('__r') + 2) + 'c';
+            }
+        }
+        
+        System.debug('listViewFields### ' + listViewFields);
+        Schema.DescribeSObjectResult descResult = Schema.describeSObjects( new String[]{'ACCL__Promotion__c'})[0];
+        Map<String,Schema.SObjectField> fieldObj = descResult.fields.getMap();
+        List<ExcelColumnsDetails> excelCoumnDetailsWrapLst = createExcelColumnsMtd(listViewFields, fieldObj);
+        
+        ListView lsvObj = [
+            SELECT Id, Name 
+            FROM ListView 
+            WHERE Id = :listviewId 
+            LIMIT 1
+        ];
+        
+        ExcelDetailWrapper excelDetailWrapObj = new ExcelDetailWrapper();
+        excelDetailWrapObj.excelColumnDetailLst = excelCoumnDetailsWrapLst;
+        excelDetailWrapObj.accountLst = Database.query(query);
+        system.debug('excelDetailWrapObj.accountLst==>'+excelDetailWrapObj.accountLst);
+        excelDetailWrapObj.listViewName = lsvObj.Name;
+        
+        return excelDetailWrapObj;
+    }
+    
+    private static List<ExcelColumnsDetails> createExcelColumnsMtd(List<String> listViewFields, Map<String,Schema.SObjectField> fieldObj){
+        List<ExcelColumnsDetails> excelCoumnDetailsWrapLst = new List<ExcelColumnsDetails>();
+        
+        for(String listViewFieldObj : listViewFields){
+            DescribeFieldResult fieldRes = fieldObj.get(listViewFieldObj.toLowerCase()).getDescribe();
+            Schema.DisplayType sobjFieldType = fieldRes.getType();
+            ExcelColumnsDetails excelColumnDetailsObj = new ExcelColumnsDetails();
+            
+            if(
+                sobjFieldType == Schema.DisplayType.ADDRESS || sobjFieldType == Schema.DisplayType.COMBOBOX 
+                || sobjFieldType == Schema.DisplayType.EMAIL || sobjFieldType == Schema.DisplayType.ID 
+                || sobjFieldType == Schema.DisplayType.MULTIPICKLIST || sobjFieldType == Schema.DisplayType.PHONE 
+                || sobjFieldType == Schema.DisplayType.PICKLIST || sobjFieldType == Schema.DisplayType.REFERENCE 
+                || sobjFieldType == Schema.DisplayType.STRING || sobjFieldType == Schema.DisplayType.TEXTAREA 
+                || sobjFieldType == Schema.DisplayType.TIME || sobjFieldType == Schema.DisplayType.URL
+                || sobjFieldType == Schema.DisplayType.DATE || sobjFieldType == Schema.DisplayType.DATETIME
+            ){
+                excelColumnDetailsObj.column = fieldRes.getLabel();
+                excelColumnDetailsObj.type = 'String';
+                excelColumnDetailsObj.wrap = true;
+                excelColumnDetailsObj.width = 30;
+                if(sobjFieldType == Schema.DisplayType.REFERENCE) excelColumnDetailsObj.isReference = true;
+            }else if(sobjFieldType == Schema.DisplayType.BOOLEAN){
+                excelColumnDetailsObj.column = fieldRes.getLabel();
+                excelColumnDetailsObj.type = 'Boolean';
+                excelColumnDetailsObj.width = 30;
+            }else if(
+                sobjFieldType == Schema.DisplayType.CURRENCY || sobjFieldType == Schema.DisplayType.DOUBLE 
+                || sobjFieldType == Schema.DisplayType.INTEGER || sobjFieldType == Schema.DisplayType.LONG 
+                || sobjFieldType == Schema.DisplayType.PERCENT
+            ){
+                excelColumnDetailsObj.column = fieldRes.getLabel();
+                excelColumnDetailsObj.type = 'Number';
+                excelColumnDetailsObj.format = '#,##0.00';
+                excelColumnDetailsObj.width = 30;
+            }else{
+                excelColumnDetailsObj.column = fieldRes.getLabel();
+                excelColumnDetailsObj.type = 'String';
+                excelColumnDetailsObj.wrap = true;
+                excelColumnDetailsObj.width = 30;
+            }
+            
+            excelColumnDetailsObj.fieldAPIName = fieldRes.getName();
+            excelCoumnDetailsWrapLst.add(excelColumnDetailsObj);
+        }
+        
+        return excelCoumnDetailsWrapLst;
+    }
+    
+    public class ExcelDetailWrapper{
+        @AuraEnabled public List<ExcelColumnsDetails> excelColumnDetailLst;
+        @AuraEnabled public List<ACCL__Promotion__c> accountLst;
+        @AuraEnabled public String listViewName;
+    }   
+    public class ExcelColumnsDetails{
+        @AuraEnabled public String column;
+        @AuraEnabled public String type;
+        @AuraEnabled public String format;
+        @AuraEnabled public Boolean wrap;
+        @AuraEnabled public Integer width;
+        @AuraEnabled public String fieldAPIName; 
+        @AuraEnabled public Boolean isReference; 
+    }
+}
